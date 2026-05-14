@@ -589,7 +589,8 @@ class _HomeScreenState extends State<HomeScreen>
         const SizedBox(height: 10),
         ...List.generate(_activityData.length, (i) {
           final item = _activityData[i];
-          return SlideTransition(
+          return ClipRect(
+            child: SlideTransition(
             position: _activitySlides[i],
             child: FadeTransition(
               opacity: _activityFades[i],
@@ -634,6 +635,7 @@ class _HomeScreenState extends State<HomeScreen>
                         color: Colors.grey.withValues(alpha: 0.15)),
                 ],
               ),
+            ),
             ),
           );
         }),
@@ -710,6 +712,7 @@ class _AnimCounterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
+      flex: 1,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -767,6 +770,7 @@ class _ShimmerCountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
+      flex: 1,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(

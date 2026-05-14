@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import '../constants/app_constants.dart';
 import '../providers/chat_provider.dart';
@@ -96,6 +97,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 cp.startNewSession();
                 _scrollToBottom();
               },
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.history_rounded, color: Colors.white),
+            tooltip: 'Purani Baatein',
+            onPressed: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const _ChatHistorySheet(),
             ),
           ),
           Consumer<ChatProvider>(
@@ -487,19 +498,29 @@ class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
         localeId = _selectedLocale;
       }
     } catch (_) {}
-    await _speech.listen(
-      onResult: (result) {
-        if (!mounted) return;
-        final text = result.recognizedWords;
-        widget.controller.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        );
-      },
-      localeId: localeId,
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 3),
-    );
+    try {
+      await _speech.listen(
+        onResult: (result) {
+          if (!mounted) return;
+          final text = result.recognizedWords;
+          widget.controller.value = TextEditingValue(
+            text: text,
+            selection: TextSelection.collapsed(offset: text.length),
+          );
+        },
+        localeId: localeId,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+      );
+    } catch (_) {
+      _onSpeechError();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Voice input error, please type instead'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
   void _showLanguageSelector() {
@@ -611,7 +632,13 @@ class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
                                 spreadRadius: 2,
                               )
                             ]
-                          : [],
+                          : [
+                              const BoxShadow(
+                                color: Colors.transparent,
+                                blurRadius: 0,
+                                spreadRadius: 0,
+                              )
+                            ],
                     ),
                     child: Icon(
                       _isListening
@@ -690,24 +717,265 @@ class _SoundWaveWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 28,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: barAnims
-            .map((anim) => AnimatedBuilder(
-                  animation: anim,
-                  builder: (_, _) => Container(
-                    width: 4,
-                    height: 6 + (22 * anim.value),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.red[400],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ))
-            .toList(),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 120),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: barAnims
+                .map((anim) => AnimatedBuilder(
+                      animation: anim,
+                      builder: (_, _) => Container(
+                        width: 4,
+                        height: 6 + (22 * anim.value),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.red[400],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
       ),
+    );
+  }
+}
+
+// ── Chat history bottom sheet ─────────────────────────────────────────────────
+
+class _ChatHistorySheet extends StatefulWidget {
+  const _ChatHistorySheet();
+
+  @override
+  State<_ChatHistorySheet> createState() => _ChatHistorySheetState();
+}
+
+class _ChatHistorySheetState extends State<_ChatHistorySheet> {
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    await context.read<ChatProvider>().loadConversationHistory();
+    if (mounted) setState(() => _loading = false);
+  }
+
+  void _confirmClearAll(ChatProvider cp) {
+    showDialog(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('History Clear Karein?',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        content: Text(
+            'Sab purani baatein hamesha ke liye mit jayengi.',
+            style: GoogleFonts.poppins(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dctx),
+            child: Text('Cancel', style: GoogleFonts.poppins()),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dctx);
+              cp.clearAllHistory();
+            },
+            child: Text('Clear All',
+                style: GoogleFonts.poppins(
+                    color: Colors.red[700],
+                    fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ChatProvider>(
+      builder: (_, cp, _) {
+        final history = cp.conversationHistory;
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF1F8E9),
+            borderRadius:
+                BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin:
+                      const EdgeInsets.only(top: 12, bottom: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Padding(
+                padding:
+                    const EdgeInsets.fromLTRB(20, 8, 12, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.history_rounded,
+                        color: AppConstants.primaryGreen, size: 22),
+                    const SizedBox(width: 8),
+                    Text('Purani Baatein',
+                        style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(),
+                )
+              else if (history.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Column(
+                    children: [
+                      Icon(Icons.chat_bubble_outline_rounded,
+                          size: 48, color: Colors.grey[300]),
+                      const SizedBox(height: 12),
+                      Text('Koi purani baat nahi',
+                          style: GoogleFonts.poppins(
+                              color: Colors.grey[400],
+                              fontSize: 14)),
+                    ],
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                      maxHeight:
+                          MediaQuery.of(context).size.height * 0.5),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: history.length,
+                    separatorBuilder: (_, _) => const Divider(
+                        height: 1, indent: 16, endIndent: 16),
+                    itemBuilder: (_, i) {
+                      final item = history[i];
+                      final sid =
+                          item['session_id'] as String? ?? '';
+                      final ts =
+                          item['timestamp'] as String? ?? '';
+                      final preview =
+                          item['preview'] as String? ?? '';
+                      final count =
+                          item['message_count'] as int? ?? 0;
+                      String dateStr = '';
+                      try {
+                        dateStr = DateFormat('dd MMM, hh:mm a')
+                            .format(DateTime.parse(ts).toLocal());
+                      } catch (_) {}
+                      return ListTile(
+                        onTap: () {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(const SnackBar(
+                            content: Text(
+                                'Chat history view coming soon'),
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                        },
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: const BoxDecoration(
+                            color: AppConstants.primaryGreen,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.chat_rounded,
+                              color: Colors.white, size: 18),
+                        ),
+                        title: Text(
+                          preview.isEmpty ? 'Chat session' : preview,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(dateStr,
+                            style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                color: Colors.grey[500])),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppConstants.primaryGreen
+                                    .withValues(alpha: 0.1),
+                                borderRadius:
+                                    BorderRadius.circular(10),
+                              ),
+                              child: Text('$count msgs',
+                                  style: GoogleFonts.poppins(
+                                      fontSize: 10,
+                                      color:
+                                          AppConstants.primaryGreen,
+                                      fontWeight:
+                                          FontWeight.w600)),
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                  color: Colors.red[400]),
+                              onPressed: () =>
+                                  cp.deleteSessionFromHistory(sid),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              if (!_loading && history.isNotEmpty) ...[
+                const Divider(height: 1),
+                TextButton.icon(
+                  onPressed: () => _confirmClearAll(cp),
+                  icon: Icon(Icons.delete_forever_rounded,
+                      size: 16, color: Colors.red[700]),
+                  label: Text('Clear All History',
+                      style: GoogleFonts.poppins(
+                          color: Colors.red[700],
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+              SizedBox(
+                  height: MediaQuery.of(context).padding.bottom + 8),
+            ],
+          ),
+        );
+      },
     );
   }
 }
