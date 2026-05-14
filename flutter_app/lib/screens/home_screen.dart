@@ -5,6 +5,7 @@ import '../constants/app_constants.dart';
 import '../providers/chat_provider.dart';
 import '../services/api_service.dart';
 import 'dart:math' as math;
+import 'package:shimmer/shimmer.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -15,11 +16,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
+  late AnimationController _counterCtrl;
+  late Animation<double> _bookingsAnim;
+  late Animation<double> _providersAnim;
+  late AnimationController _dotCtrl;
+  late AnimationController _activityCtrl;
+  final List<Animation<Offset>> _activitySlides = [];
+  final List<Animation<double>> _activityFades = [];
   bool _stressLoading = false;
 
   @override
@@ -30,12 +38,49 @@ class _HomeScreenState extends State<HomeScreen>
     _fadeAnim =
         CurvedAnimation(parent: _animCtrl, curve: Curves.easeIn);
     _animCtrl.forward();
+
+    _counterCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1500));
+    _bookingsAnim = Tween<double>(begin: 0, end: 47)
+        .animate(CurvedAnimation(parent: _counterCtrl, curve: Curves.easeOut));
+    _providersAnim = Tween<double>(begin: 0, end: 23)
+        .animate(CurvedAnimation(parent: _counterCtrl, curve: Curves.easeOut));
+
+    _dotCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+
+    _activityCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1400));
+    for (int i = 0; i < 4; i++) {
+      final start = i * 0.18;
+      final end = (start + 0.45).clamp(0.0, 1.0);
+      _activitySlides.add(Tween<Offset>(
+              begin: const Offset(0.25, 0), end: Offset.zero)
+          .animate(CurvedAnimation(
+              parent: _activityCtrl,
+              curve: Interval(start, end, curve: Curves.easeOutCubic))));
+      _activityFades.add(Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+              parent: _activityCtrl,
+              curve: Interval(start, end, curve: Curves.easeOut))));
+    }
+
+    Future.delayed(const Duration(milliseconds: 450), () {
+      if (mounted) {
+        _counterCtrl.forward();
+        _activityCtrl.forward();
+      }
+    });
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _animCtrl.dispose();
+    _counterCtrl.dispose();
+    _dotCtrl.dispose();
+    _activityCtrl.dispose();
     super.dispose();
   }
 
@@ -426,6 +471,8 @@ class _HomeScreenState extends State<HomeScreen>
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 24),
+                            _buildStatsDashboard(),
                           ],
                         ),
                       ),
@@ -457,6 +504,307 @@ class _HomeScreenState extends State<HomeScreen>
                   style: GoogleFonts.poppins(
                       fontSize: 13, fontWeight: FontWeight.w600)),
             ),
+    );
+  }
+
+  static const _activityData = [
+    ('🔧', 'Ahmed ne plumber book kiya - G-11', '2 min ago', Color(0xFF1B5E20)),
+    ('❄️', 'Sara ki AC service complete', '15 min ago', Color(0xFF0277BD)),
+    ('⚡', 'Bilal ne electrician request kiya - F-8', '32 min ago', Color(0xFFF57F17)),
+    ('✅', 'Usman ki booking confirmed - G-13', '1 hour ago', Color(0xFF6A1B9A)),
+  ];
+
+  static const _trending = [
+    ('🔥 AC Repair', '24 today'),
+    ('⚡ Electrician', '18 today'),
+    ('🔧 Plumber', '31 today'),
+    ('🎨 Painter', '12 today'),
+  ];
+
+  Widget _buildStatsDashboard() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Aaj Ki Activity',
+                style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppConstants.primaryGreen)),
+            const SizedBox(width: 8),
+            AnimatedBuilder(
+              animation: _dotCtrl,
+              builder: (_, _) => Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: Color.lerp(AppConstants.primaryGreen,
+                      const Color(0xFFA5D6A7), _dotCtrl.value),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppConstants.primaryGreen
+                          .withValues(alpha: 0.5 * _dotCtrl.value),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _AnimCounterCard(
+              animation: _bookingsAnim,
+              label: 'Bookings Today',
+              icon: Icons.calendar_today_rounded,
+              color: const Color(0xFF0277BD),
+            ),
+            const SizedBox(width: 8),
+            _AnimCounterCard(
+              animation: _providersAnim,
+              label: 'Active Providers',
+              icon: Icons.people_alt_rounded,
+              color: AppConstants.primaryGreen,
+            ),
+            const SizedBox(width: 8),
+            _ShimmerCountCard(
+              label: 'Avg Response',
+              value: '2.3 min',
+              icon: Icons.timer_outlined,
+              color: Colors.orange[700]!,
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Text('Recent Activity',
+            style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey[800])),
+        const SizedBox(height: 10),
+        ...List.generate(_activityData.length, (i) {
+          final item = _activityData[i];
+          return SlideTransition(
+            position: _activitySlides[i],
+            child: FadeTransition(
+              opacity: _activityFades[i],
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: item.$4.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(item.$1,
+                              style: const TextStyle(fontSize: 18)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item.$2,
+                                style: GoogleFonts.poppins(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87)),
+                            Text(item.$3,
+                                style: GoogleFonts.poppins(
+                                    fontSize: 11,
+                                    color: Colors.grey[500])),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (i < _activityData.length - 1)
+                    Divider(
+                        height: 16,
+                        color: Colors.grey.withValues(alpha: 0.15)),
+                ],
+              ),
+            ),
+          );
+        }),
+        const SizedBox(height: 20),
+        Text('Trending Services',
+            style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey[800])),
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: _trending.map((t) {
+              return Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 6)
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(t.$1,
+                        style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppConstants.primaryGreen)),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppConstants.primaryGreen
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(t.$2,
+                          style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppConstants.primaryGreen)),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+class _AnimCounterCard extends StatelessWidget {
+  final Animation<double> animation;
+  final String label;
+  final IconData icon;
+  final Color color;
+  const _AnimCounterCard(
+      {required this.animation,
+      required this.label,
+      required this.icon,
+      required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.white, color.withValues(alpha: 0.06)],
+          ),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 6)
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 5),
+            AnimatedBuilder(
+              animation: animation,
+              builder: (_, _) => Text(
+                '${animation.value.round()}',
+                style: GoogleFonts.poppins(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: color),
+              ),
+            ),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    color: Colors.grey[500],
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShimmerCountCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  const _ShimmerCountCard(
+      {required this.label,
+      required this.value,
+      required this.icon,
+      required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.white, color.withValues(alpha: 0.06)],
+          ),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 6)
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 5),
+            Shimmer.fromColors(
+              baseColor: color,
+              highlightColor: color.withValues(alpha: 0.4),
+              child: Text(value,
+                  style: GoogleFonts.poppins(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: color)),
+            ),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                    fontSize: 9,
+                    color: Colors.grey[500],
+                    fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/provider_model.dart';
 import '../models/agent_response.dart';
 import '../constants/app_constants.dart';
+import '../screens/provider_profile_screen.dart';
 
 class ProviderCardWidget extends StatefulWidget {
   final dynamic provider;
@@ -176,13 +177,20 @@ class _ProviderCardWidgetState extends State<ProviderCardWidget> {
       child: Column(
         children: [
           InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ProviderProfileScreen(
+                provider: widget.provider,
+                isRecommended: widget.isRecommended,
+              ),
+            )),
             borderRadius: BorderRadius.circular(14),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  Stack(
+                  Hero(
+                    tag: 'provider-avatar-$_name',
+                    child: Stack(
                     children: [
                       _Avatar(initials: _initials, color: _avatarColor),
                       if (_available)
@@ -201,7 +209,7 @@ class _ProviderCardWidgetState extends State<ProviderCardWidget> {
                           ),
                         ),
                     ],
-                  ),
+                  )),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -281,11 +289,21 @@ class _ProviderCardWidgetState extends State<ProviderCardWidget> {
                           color: AppConstants.primaryGreen,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        _expanded ? Icons.expand_less : Icons.expand_more,
-                        color: Colors.grey,
-                        size: 20,
+                      const SizedBox(width: 2),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            setState(() => _expanded = !_expanded),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            _expanded
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                            color: Colors.grey,
+                            size: 20,
+                          ),
+                        ),
                       ),
                     ],
                   ),

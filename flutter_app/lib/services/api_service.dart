@@ -71,11 +71,13 @@ class ApiService {
     required String message,
     required String userName,
     required String sessionId,
+    String responseLanguage = 'auto',
   }) async {
     final data = await _post('/chat', {
       'message': message,
       'user_name': userName,
       'session_id': sessionId,
+      'response_language': responseLanguage,
     });
     final agent = AgentResponse.fromJson(data['agent'] as Map<String, dynamic>);
     Booking? pending;

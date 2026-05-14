@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import '../constants/app_constants.dart';
 import '../providers/chat_provider.dart';
 import '../widgets/typing_indicator.dart';
@@ -96,6 +97,56 @@ class _ChatScreenState extends State<ChatScreen> {
                 _scrollToBottom();
               },
             ),
+          ),
+          Consumer<ChatProvider>(
+            builder: (_, cp, _) {
+              final lang = cp.responseLanguage;
+              final label = lang == 'urdu'
+                  ? 'UR'
+                  : lang == 'english'
+                      ? 'EN'
+                      : 'AUTO';
+              return Tooltip(
+                message: 'Response language: tap to cycle AUTO → EN → UR',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    final next = lang == 'auto'
+                        ? 'english'
+                        : lang == 'english'
+                            ? 'urdu'
+                            : 'auto';
+                    cp.setResponseLanguage(next);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(next == 'urdu'
+                          ? 'Responses: Roman Urdu'
+                          : next == 'english'
+                              ? 'Responses: English only'
+                              : 'Responses: Auto-detect'),
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(
+                        vertical: 10, horizontal: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.35)),
+                    ),
+                    child: Text(label,
+                        style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white)),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -306,16 +357,218 @@ class _InputBar extends StatefulWidget {
   State<_InputBar> createState() => _InputBarState();
 }
 
-class _InputBarState extends State<_InputBar> {
+class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
   bool _hasText = false;
+  bool _isListening = false;
+  bool _speechAvailable = false;
+  String _selectedLocale = 'auto';
+  final SpeechToText _speech = SpeechToText();
+  final List<AnimationController> _barCtrls = [];
+  final List<Animation<double>> _barAnims = [];
 
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(() {
-      final has = widget.controller.text.trim().isNotEmpty;
-      if (has != _hasText) setState(() => _hasText = has);
-    });
+    widget.controller.addListener(_onTextChanged);
+    _initBarAnimations();
+    _initSpeech();
+  }
+
+  void _onTextChanged() {
+    final has = widget.controller.text.trim().isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
+  }
+
+  void _initBarAnimations() {
+    const durations = [280, 340, 260, 380, 300];
+    for (int i = 0; i < 5; i++) {
+      final ctrl = AnimationController(
+        vsync: this,
+        duration: Duration(milliseconds: durations[i]),
+      );
+      _barCtrls.add(ctrl);
+      _barAnims.add(Tween<double>(begin: 0.12, end: 1.0).animate(
+        CurvedAnimation(parent: ctrl, curve: Curves.easeInOut),
+      ));
+    }
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onStatus: _onSpeechStatus,
+        onError: (e) => _onSpeechError(),
+      );
+    } catch (_) {
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onSpeechStatus(String status) {
+    if (status == 'done' || status == 'notListening') {
+      if (!mounted) return;
+      setState(() => _isListening = false);
+      _stopBars();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (widget.controller.text.trim().isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) widget.onSend();
+        });
+      }
+    }
+  }
+
+  void _onSpeechError() {
+    if (!mounted) return;
+    setState(() => _isListening = false);
+    _stopBars();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  }
+
+  void _startBars() {
+    for (int i = 0; i < _barCtrls.length; i++) {
+      Future.delayed(Duration(milliseconds: i * 55), () {
+        if (mounted && _isListening) _barCtrls[i].repeat(reverse: true);
+      });
+    }
+  }
+
+  void _stopBars() {
+    for (final c in _barCtrls) {
+      c.stop();
+      c.animateTo(0.0, duration: const Duration(milliseconds: 150));
+    }
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      final messenger = ScaffoldMessenger.of(context);
+      await _speech.stop();
+      setState(() => _isListening = false);
+      _stopBars();
+      messenger.hideCurrentSnackBar();
+      return;
+    }
+    if (!_speechAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Voice input not supported on this device'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    setState(() => _isListening = true);
+    _startBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        _selectedLocale == 'ur-PK'
+            ? 'بول رہے ہیں... (Speaking...)'
+            : 'Bol rahe hain... (Speaking...)',
+      ),
+      duration: const Duration(seconds: 60),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: Colors.red[700],
+    ));
+    String localeId = 'en-US';
+    try {
+      if (_selectedLocale == 'auto' || _selectedLocale == 'ur-PK') {
+        final locales = await _speech.locales();
+        if (locales.isNotEmpty) {
+          final preferred = locales.firstWhere(
+            (l) => l.localeId.startsWith('ur'),
+            orElse: () => locales.firstWhere(
+              (l) => l.localeId.startsWith('en'),
+              orElse: () => locales.first,
+            ),
+          );
+          localeId = preferred.localeId;
+        }
+      } else {
+        localeId = _selectedLocale;
+      }
+    } catch (_) {}
+    await _speech.listen(
+      onResult: (result) {
+        if (!mounted) return;
+        final text = result.recognizedWords;
+        widget.controller.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+      },
+      localeId: localeId,
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 3),
+    );
+  }
+
+  void _showLanguageSelector() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 16),
+          Text('Select Language',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700, fontSize: 16)),
+          const Divider(),
+          ListTile(
+            leading: const Text('🌐', style: TextStyle(fontSize: 22)),
+            title: Text('Auto-detect', style: GoogleFonts.poppins()),
+            trailing: _selectedLocale == 'auto'
+                ? const Icon(Icons.check_rounded,
+                    color: AppConstants.primaryGreen)
+                : null,
+            onTap: () {
+              setState(() => _selectedLocale = 'auto');
+              Navigator.pop(ctx);
+            },
+          ),
+          ListTile(
+            leading: const Text('🇵🇰', style: TextStyle(fontSize: 22)),
+            title: Text('اردو (Urdu)', style: GoogleFonts.poppins()),
+            subtitle: Text('ur-PK',
+                style: GoogleFonts.poppins(
+                    fontSize: 11, color: Colors.grey)),
+            trailing: _selectedLocale == 'ur-PK'
+                ? const Icon(Icons.check_rounded,
+                    color: AppConstants.primaryGreen)
+                : null,
+            onTap: () {
+              setState(() => _selectedLocale = 'ur-PK');
+              Navigator.pop(ctx);
+            },
+          ),
+          ListTile(
+            leading: const Text('🇺🇸', style: TextStyle(fontSize: 22)),
+            title: Text('English (en-US)', style: GoogleFonts.poppins()),
+            trailing: _selectedLocale == 'en-US'
+                ? const Icon(Icons.check_rounded,
+                    color: AppConstants.primaryGreen)
+                : null,
+            onTap: () {
+              setState(() => _selectedLocale = 'en-US');
+              Navigator.pop(ctx);
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    _speech.stop();
+    for (final c in _barCtrls) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   @override
@@ -327,60 +580,133 @@ class _InputBarState extends State<_InputBar> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 10,
-                offset: const Offset(0, -2))
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            )
           ],
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: widget.controller,
-                focusNode: widget.focusNode,
-                enabled: !cp.isTyping,
-                maxLines: null,
-                textCapitalization: TextCapitalization.sentences,
-                style: GoogleFonts.poppins(fontSize: 14),
-                decoration: InputDecoration(
-                  hintText:
-                      'AC repair chahiye... or plumber bulao...',
-                  hintStyle: GoogleFonts.poppins(
-                      fontSize: 13, color: Colors.grey[400]),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+            if (_isListening) ...[_SoundWaveWidget(barAnims: _barAnims), const SizedBox(height: 4)],
+            Row(
+              children: [
+                GestureDetector(
+                  onTap: _toggleListening,
+                  onLongPress: _showLanguageSelector,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutBack,
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _isListening ? Colors.red : Colors.grey[100],
+                      shape: BoxShape.circle,
+                      boxShadow: _isListening
+                          ? [
+                              BoxShadow(
+                                color: Colors.red.withValues(alpha: 0.45),
+                                blurRadius: 14,
+                                spreadRadius: 2,
+                              )
+                            ]
+                          : [],
+                    ),
+                    child: Icon(
+                      _isListening
+                          ? Icons.mic_rounded
+                          : Icons.mic_none_rounded,
+                      color:
+                          _isListening ? Colors.white : Colors.grey[600],
+                      size: 20,
+                    ),
                   ),
-                  filled: true,
-                  fillColor: const Color(0xFFF5F5F5),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
                 ),
-                onSubmitted: (_) => cp.isTyping ? null : widget.onSend(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              child: FloatingActionButton.small(
-                onPressed:
-                    cp.isTyping || !_hasText ? null : widget.onSend,
-                backgroundColor: cp.isTyping || !_hasText
-                    ? Colors.grey[300]
-                    : AppConstants.primaryGreen,
-                elevation: _hasText ? 3 : 0,
-                child: cp.isTyping
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.send_rounded,
-                        color: Colors.white, size: 20),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    enabled: !cp.isTyping,
+                    maxLines: null,
+                    textCapitalization: TextCapitalization.sentences,
+                    style: GoogleFonts.poppins(fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: _isListening
+                          ? 'بول رہے ہیں...'
+                          : 'AC repair chahiye... or plumber bulao...',
+                      hintStyle: GoogleFonts.poppins(
+                          fontSize: 13, color: Colors.grey[400]),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: _isListening
+                          ? Colors.red.withValues(alpha: 0.04)
+                          : const Color(0xFFF5F5F5),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                    ),
+                    onSubmitted: (_) =>
+                        cp.isTyping ? null : widget.onSend(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  child: FloatingActionButton.small(
+                    onPressed:
+                        cp.isTyping || !_hasText ? null : widget.onSend,
+                    backgroundColor: cp.isTyping || !_hasText
+                        ? Colors.grey[300]
+                        : AppConstants.primaryGreen,
+                    elevation: _hasText ? 3 : 0,
+                    child: cp.isTyping
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.send_rounded,
+                            color: Colors.white, size: 20),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SoundWaveWidget extends StatelessWidget {
+  final List<Animation<double>> barAnims;
+  const _SoundWaveWidget({required this.barAnims});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 28,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: barAnims
+            .map((anim) => AnimatedBuilder(
+                  animation: anim,
+                  builder: (_, _) => Container(
+                    width: 4,
+                    height: 6 + (22 * anim.value),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.red[400],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ))
+            .toList(),
       ),
     );
   }

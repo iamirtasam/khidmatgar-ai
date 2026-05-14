@@ -158,9 +158,18 @@ def get_booking(booking_id: str):
 @app.post("/chat")
 def chat(req: ChatRequest):
     providers = _safe_get_providers()
+    lang = (req.response_language or "auto").lower()
+    if lang == "urdu":
+        lang_suffix = "\n\nPlease respond in Roman Urdu (using English letters to write Urdu words)."
+    elif lang == "english":
+        lang_suffix = "\n\nPlease respond in English only."
+    else:
+        lang_suffix = ""
+    effective_message = req.message + lang_suffix
+
     try:
         agent_resp = get_agent().analyze(
-            user_message=req.message,
+            user_message=effective_message,
             providers=providers,
             user_name=req.user_name,
             is_returning_user=_is_returning_user(req.user_name),

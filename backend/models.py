@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     message: str
     user_name: str
     session_id: str
+    response_language: Optional[str] = "auto"
 
 
 class ConfirmBookingRequest(BaseModel):

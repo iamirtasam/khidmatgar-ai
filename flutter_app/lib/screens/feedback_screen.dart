@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../constants/app_constants.dart';
+import 'package:uuid/uuid.dart';
 import '../services/api_service.dart';
 
 class FeedbackScreen extends StatefulWidget {
@@ -19,16 +20,23 @@ class FeedbackScreen extends StatefulWidget {
 }
 
 class _FeedbackScreenState extends State<FeedbackScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  static const _uuid = Uuid();
   int _rating = 0;
   final _commentCtrl = TextEditingController();
+  final _detailsCtrl = TextEditingController();
+  final Set<String> _selectedIssues = {};
   bool _isLoading = false;
   bool _submitted = false;
+  bool _isDispute = false;
+  String? _complaintId;
   String? _error;
 
   late AnimationController _thankCtrl;
   late Animation<double> _thankScale;
   late Animation<double> _thankFade;
+  late AnimationController _resolutionCtrl;
+  late Animation<Color?> _resolutionColor;
 
   @override
   void initState() {
@@ -39,12 +47,24 @@ class _FeedbackScreenState extends State<FeedbackScreen>
         CurvedAnimation(parent: _thankCtrl, curve: Curves.elasticOut));
     _thankFade = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _thankCtrl, curve: Curves.easeIn));
+    _resolutionCtrl = AnimationController(
+        vsync: this, duration: const Duration(seconds: 3));
+    _resolutionColor = TweenSequence<Color?>([
+      TweenSequenceItem(
+          tween: ColorTween(begin: Colors.red[700], end: Colors.orange[700]),
+          weight: 50),
+      TweenSequenceItem(
+          tween: ColorTween(begin: Colors.orange[700], end: Colors.green[700]),
+          weight: 50),
+    ]).animate(_resolutionCtrl);
   }
 
   @override
   void dispose() {
     _commentCtrl.dispose();
+    _detailsCtrl.dispose();
     _thankCtrl.dispose();
+    _resolutionCtrl.dispose();
     super.dispose();
   }
 
@@ -53,22 +73,38 @@ class _FeedbackScreenState extends State<FeedbackScreen>
       setState(() => _error = 'Kripya rating dein (1-5 sitare)');
       return;
     }
+    if (_rating <= 2 && _selectedIssues.isEmpty) {
+      setState(() => _error = 'Kripya masla select karein');
+      return;
+    }
     setState(() {
       _isLoading = true;
       _error = null;
     });
     try {
+      final comment = _rating <= 2
+          ? 'Dispute: ${_selectedIssues.join(', ')}. ${_detailsCtrl.text.trim()}'
+          : _commentCtrl.text.trim();
       await ApiService.submitFeedback(
         bookingId: widget.bookingId,
         rating: _rating,
-        comment: _commentCtrl.text.trim(),
+        comment: comment,
       );
       if (!mounted) return;
+      final isDispute = _rating <= 2;
       setState(() {
         _isLoading = false;
         _submitted = true;
+        _isDispute = isDispute;
+        if (isDispute) {
+          _complaintId = _uuid.v4().substring(0, 8).toUpperCase();
+        }
       });
-      _thankCtrl.forward();
+      if (isDispute) {
+        _resolutionCtrl.forward();
+      } else {
+        _thankCtrl.forward();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -110,25 +146,44 @@ class _FeedbackScreenState extends State<FeedbackScreen>
         ),
       ),
       body: SafeArea(
-        child: _submitted ? _ThankYouView(
-          scale: _thankScale,
-          fade: _thankFade,
-          rating: _rating,
-          onDone: () =>
-              Navigator.of(context).popUntil((r) => r.isFirst),
-        ) : _FeedbackForm(
-          providerName: widget.providerName,
-          rating: _rating,
-          ratingLabel: _ratingLabel,
-          commentCtrl: _commentCtrl,
-          isLoading: _isLoading,
-          error: _error,
-          onRatingUpdate: (r) => setState(() {
-            _rating = r.round();
-            _error = null;
-          }),
-          onSubmit: _submit,
-        ),
+        child: _submitted
+            ? (_isDispute
+                ? _DisputeResolutionView(
+                    colorAnim: _resolutionColor,
+                    complaintId: _complaintId ?? '',
+                    selectedIssues: _selectedIssues,
+                    onDone: () =>
+                        Navigator.of(context).popUntil((r) => r.isFirst),
+                  )
+                : _ThankYouView(
+                    scale: _thankScale,
+                    fade: _thankFade,
+                    rating: _rating,
+                    onDone: () =>
+                        Navigator.of(context).popUntil((r) => r.isFirst),
+                  ))
+            : _FeedbackForm(
+                providerName: widget.providerName,
+                rating: _rating,
+                ratingLabel: _ratingLabel,
+                commentCtrl: _commentCtrl,
+                detailsCtrl: _detailsCtrl,
+                selectedIssues: _selectedIssues,
+                onIssueToggle: (issue) => setState(() {
+                  if (_selectedIssues.contains(issue)) {
+                    _selectedIssues.remove(issue);
+                  } else {
+                    _selectedIssues.add(issue);
+                  }
+                }),
+                isLoading: _isLoading,
+                error: _error,
+                onRatingUpdate: (r) => setState(() {
+                  _rating = r.round();
+                  _error = null;
+                }),
+                onSubmit: _submit,
+              ),
       ),
     );
   }
@@ -141,6 +196,9 @@ class _FeedbackForm extends StatelessWidget {
   final int rating;
   final String ratingLabel;
   final TextEditingController commentCtrl;
+  final TextEditingController detailsCtrl;
+  final Set<String> selectedIssues;
+  final ValueChanged<String> onIssueToggle;
   final bool isLoading;
   final String? error;
   final ValueChanged<double> onRatingUpdate;
@@ -151,6 +209,9 @@ class _FeedbackForm extends StatelessWidget {
     required this.rating,
     required this.ratingLabel,
     required this.commentCtrl,
+    required this.detailsCtrl,
+    required this.selectedIssues,
+    required this.onIssueToggle,
     required this.isLoading,
     this.error,
     required this.onRatingUpdate,
@@ -239,6 +300,91 @@ class _FeedbackForm extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
+          if (rating <= 2 && rating > 0) ...[AnimatedContainer(
+            duration: const Duration(milliseconds: 350),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(16),
+              border:
+                  Border.all(color: Colors.red.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.report_problem_outlined,
+                      color: Colors.red, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Kya hua? (What went wrong?)',
+                      style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.red[700])),
+                ]),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    'Provider late tha',
+                    'Kaam theek nahi tha',
+                    'Price zyada tha',
+                    'Provider nahi aya',
+                  ].map((issue) {
+                    final sel = selectedIssues.contains(issue);
+                    return GestureDetector(
+                      onTap: () => onIssueToggle(issue),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: sel ? Colors.red[700] : Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: sel
+                                  ? Colors.red[700]!
+                                  : Colors.red.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(issue,
+                            style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color:
+                                    sel ? Colors.white : Colors.red[700])),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: detailsCtrl,
+                  maxLines: 3,
+                  style: GoogleFonts.poppins(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Aur details batayein (optional)...',
+                    hintStyle: GoogleFonts.poppins(
+                        fontSize: 12, color: Colors.grey[400]),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                          color: Colors.red.withValues(alpha: 0.3)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide:
+                          const BorderSide(color: Colors.red, width: 1.5),
+                    ),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+              ],
+            ),
+          ), const SizedBox(height: 16)],
+
           // Comment field
           TextField(
             controller: commentCtrl,
@@ -295,7 +441,8 @@ class _FeedbackForm extends StatelessWidget {
             child: ElevatedButton(
               onPressed: isLoading ? null : onSubmit,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppConstants.primaryGreen,
+                backgroundColor:
+                    rating <= 2 ? Colors.red[700] : AppConstants.primaryGreen,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
                 elevation: 4,
@@ -309,11 +456,19 @@ class _FeedbackForm extends StatelessWidget {
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.send_rounded, size: 18),
+                        Icon(
+                            rating <= 2
+                                ? Icons.report_rounded
+                                : Icons.send_rounded,
+                            size: 18),
                         const SizedBox(width: 8),
-                        Text('Rating Submit Karein',
+                        Text(
+                            rating <= 2
+                                ? 'Submit Complaint'
+                                : 'Rating Submit Karein',
                             style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w600, fontSize: 15)),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15)),
                       ],
                     ),
             ),
@@ -410,6 +565,156 @@ class _ThankYouView extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Dispute resolution view ───────────────────────────────────────────────────
+
+class _DisputeResolutionView extends StatelessWidget {
+  final Animation<Color?> colorAnim;
+  final String complaintId;
+  final Set<String> selectedIssues;
+  final VoidCallback onDone;
+
+  const _DisputeResolutionView({
+    required this.colorAnim,
+    required this.complaintId,
+    required this.selectedIssues,
+    required this.onDone,
+  });
+
+  String get _resolutionText {
+    if (selectedIssues.contains('Provider nahi aya')) {
+      return 'Aapko full refund milega. Provider ko blacklist kiya ja raha hai.';
+    } else if (selectedIssues.contains('Provider late tha')) {
+      return 'Aapko 10% discount diya jayega agli booking par.';
+    } else if (selectedIssues.contains('Kaam theek nahi tha')) {
+      return 'Ek free re-service schedule ki ja rahi hai.';
+    } else {
+      return 'Price review kiya ja raha hai. 24 ghante mein response milega.';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: AnimatedBuilder(
+        animation: colorAnim,
+        builder: (_, _) {
+          final col = colorAnim.value ?? Colors.red[700]!;
+          return Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: col.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: col, width: 2),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                          color: col, shape: BoxShape.circle),
+                      child: const Icon(Icons.support_agent_rounded,
+                          color: Colors.white, size: 36),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Complaint Darj Ho Gayi',
+                        style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black87),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text('ID: $complaintId',
+                          style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey[700],
+                              letterSpacing: 1.2)),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.auto_fix_high_rounded,
+                              color: col, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(_resolutionText,
+                                style: GoogleFonts.poppins(
+                                    fontSize: 13,
+                                    color: Colors.grey[800],
+                                    height: 1.5)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(
+                        'Complaint ID: $complaintId — Status: Processing'),
+                    behavior: SnackBarBehavior.floating,
+                  )),
+                  icon: const Icon(Icons.track_changes_rounded, size: 16),
+                  label: Text('Track Complaint',
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red[700],
+                    side: BorderSide(color: Colors.red[700]!),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: onDone,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConstants.primaryGreen,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: Text('Home Par Jayen',
+                      style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600, fontSize: 15)),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

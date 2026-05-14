@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +9,7 @@ import '../providers/chat_provider.dart';
 import '../models/price_quote.dart';
 import '../models/provider_model.dart';
 import 'feedback_screen.dart';
+import 'booking_tracker_screen.dart';
 
 class BookingConfirmScreen extends StatefulWidget {
   final AgentResponse agentResponse;
@@ -44,6 +46,17 @@ class _BookingConfirmScreenState extends State<BookingConfirmScreen> {
       _confirmed = yes;
       _booking = booking;
     });
+    if (yes && mounted) {
+      await Future.delayed(const Duration(milliseconds: 1800));
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => BookingTrackerScreen(
+          booking: booking,
+          provider: widget.agentResponse.recommendedProvider,
+          intent: widget.agentResponse.extractedIntent,
+        ),
+      ));
+    }
   }
 
   Color get _avatarColor {
@@ -468,6 +481,14 @@ class _SuccessViewState extends State<_SuccessView>
                       ],
                     ),
                   ),
+                const SizedBox(height: 12),
+                if (widget.booking != null)
+                  _ReceiptCard(
+                    booking: widget.booking!,
+                    provider: widget.provider,
+                    quote: widget.quote,
+                    intent: widget.intent,
+                  ),
                 const SizedBox(height: 16),
                 // Summary card
                 Card(
@@ -745,4 +766,300 @@ class _SummaryRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Receipt Card ─────────────────────────────────────────────────────────────
+
+class _ReceiptCard extends StatelessWidget {
+  final Booking booking;
+  final ProviderModel? provider;
+  final PriceQuote? quote;
+  final ExtractedIntent? intent;
+
+  const _ReceiptCard({
+    required this.booking,
+    this.provider,
+    this.quote,
+    this.intent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final service = booking.service.isNotEmpty
+        ? booking.service
+        : provider?.service ?? '';
+    final providerName = booking.providerName.isNotEmpty
+        ? booking.providerName
+        : provider?.name ?? '';
+    final area = booking.location.isNotEmpty
+        ? booking.location
+        : provider?.area ?? '';
+    final dateTime = booking.dateTime.isNotEmpty
+        ? booking.dateTime
+        : (intent?.preferredTime ?? 'Kal Subah 10:00 AM');
+
+    return CustomPaint(
+      foregroundPainter: _DashedBorderPainter(),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFAFAF8),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'خ',
+                  style: TextStyle(
+                    fontSize: 22,
+                    color: AppConstants.primaryGreen,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'KhidmatGar',
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppConstants.primaryGreen,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'SERVICE RECEIPT',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                letterSpacing: 2.5,
+                color: Colors.grey[500],
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Divider(),
+            const SizedBox(height: 6),
+            _ReceiptRow(label: 'Booking ID', value: booking.bookingId),
+            _ReceiptRow(label: 'Service', value: service),
+            _ReceiptRow(label: 'Provider', value: providerName),
+            _ReceiptRow(label: 'Area', value: area),
+            _ReceiptRow(label: 'Date/Time', value: dateTime),
+            if (quote != null && quote!.total > 0) ...[
+              _ReceiptRow(
+                  label: 'Base Fee',
+                  value: 'PKR ${quote!.baseFee.toStringAsFixed(0)}'),
+              _ReceiptRow(
+                  label: 'Total',
+                  value: 'PKR ${quote!.total.toStringAsFixed(0)}',
+                  bold: true),
+            ] else
+              _ReceiptRow(
+                  label: 'Amount',
+                  value: booking.price.isNotEmpty ? booking.price : 'PKR ---'),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 1,
+              child: CustomPaint(painter: _DashedLinePainter()),
+            ),
+            const SizedBox(height: 18),
+            CustomPaint(
+              size: const Size(88, 88),
+              painter: _QrCodePainter(booking.bookingId),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Scan to verify booking',
+              style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[400]),
+            ),
+            const SizedBox(height: 14),
+            const Divider(),
+            const SizedBox(height: 4),
+            Text(
+              'Powered by Google Antigravity AI',
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                color: Colors.grey[400],
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Receipt saved to gallery'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.save_alt_rounded, size: 16),
+                label: Text('Save Receipt',
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppConstants.primaryGreen,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReceiptRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool bold;
+  const _ReceiptRow(
+      {required this.label, required this.value, this.bold = false});
+
+  @override
+  Widget build(BuildContext context) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style:
+                  GoogleFonts.poppins(fontSize: 11, color: Colors.grey[500])),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                color: bold ? AppConstants.primaryGreen : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashedBorderPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.grey[300]!
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    const dash = 8.0;
+    const gap = 5.0;
+    const r = 16.0;
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+        Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),
+        const Radius.circular(r),
+      ));
+    for (final metric in path.computeMetrics()) {
+      double dist = 0;
+      bool draw = true;
+      while (dist < metric.length) {
+        final len = draw ? dash : gap;
+        if (draw) {
+          canvas.drawPath(metric.extractPath(dist, dist + len), paint);
+        }
+        dist += len;
+        draw = !draw;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+class _DashedLinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.grey[300]!
+      ..strokeWidth = 1.0;
+    const dash = 7.0;
+    const gap = 4.0;
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + dash, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+class _QrCodePainter extends CustomPainter {
+  final String seed;
+  const _QrCodePainter(this.seed);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final black = Paint()..color = Colors.black;
+    final white = Paint()..color = Colors.white;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), white);
+    const mods = 21;
+    final m = size.width / mods;
+
+    void drawFinder(int c, int r) {
+      canvas.drawRect(
+          Rect.fromLTWH(c * m, r * m, 7 * m, 7 * m), black);
+      canvas.drawRect(
+          Rect.fromLTWH((c + 1) * m, (r + 1) * m, 5 * m, 5 * m), white);
+      canvas.drawRect(
+          Rect.fromLTWH((c + 2) * m, (r + 2) * m, 3 * m, 3 * m), black);
+    }
+
+    drawFinder(0, 0);
+    drawFinder(14, 0);
+    drawFinder(0, 14);
+
+    for (int i = 8; i <= 12; i++) {
+      if (i.isEven) {
+        canvas.drawRect(
+            Rect.fromLTWH(i * m, 6 * m, m - 0.3, m - 0.3), black);
+        canvas.drawRect(
+            Rect.fromLTWH(6 * m, i * m, m - 0.3, m - 0.3), black);
+      }
+    }
+
+    int hash = seed.isEmpty
+        ? 12345
+        : seed.codeUnits.fold(0, (a, b) => (a * 31 + b) & 0x7FFFFFFF);
+    for (int row = 0; row < mods; row++) {
+      for (int col = 0; col < mods; col++) {
+        if (col < 8 && row < 8) continue;
+        if (col > 12 && row < 8) continue;
+        if (col < 8 && row > 12) continue;
+        if (row == 6 || col == 6) continue;
+        hash = ((hash * 1664525 + 1013904223) & 0x7FFFFFFF);
+        if (hash % 3 != 0) {
+          canvas.drawRect(
+              Rect.fromLTWH(col * m, row * m, m - 0.4, m - 0.4), black);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }

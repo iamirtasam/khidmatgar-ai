@@ -29,6 +29,7 @@ class ChatProvider extends ChangeNotifier {
   bool _isTyping = false;
   String _sessionId = _uuid.v4();
   String _userName = '';
+  String _responseLanguage = 'auto';
   Booking? _pendingBooking;
   AgentResponse? _lastAgentResponse;
   String? _error;
@@ -41,9 +42,15 @@ class ChatProvider extends ChangeNotifier {
   AgentResponse? get lastAgentResponse => _lastAgentResponse;
   String? get error => _error;
   bool get hasPendingBooking => _pendingBooking != null;
+  String get responseLanguage => _responseLanguage;
 
   void setUserName(String name) {
     _userName = name.trim();
+    notifyListeners();
+  }
+
+  void setResponseLanguage(String lang) {
+    _responseLanguage = lang;
     notifyListeners();
   }
 
@@ -74,6 +81,7 @@ class ChatProvider extends ChangeNotifier {
         message: trimmed,
         userName: _userName,
         sessionId: _sessionId,
+        responseLanguage: _responseLanguage,
       );
 
       final agent = result.agent;
